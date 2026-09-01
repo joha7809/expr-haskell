@@ -5,7 +5,14 @@ import Data.Functor
 import Text.Read (readMaybe)
 
 main :: IO ()
-main = undefined
+main = do
+  input <- getLine
+  case runParser exprParser input of
+    Nothing -> putStrLn "Parsing error, skill issue fr"
+    Just (expr, rest) -> do
+      putStrLn $ "Parsed: " ++ pretty expr
+      putStrLn $ "Result: " ++ show (eval expr)
+      putStrLn $ "Remaining input: " ++ show rest
 
 data Expr
   = Lit Int
@@ -25,6 +32,7 @@ precedence (Sub _ _) = 0
 eval :: Expr -> Int
 eval (Lit n) = n
 eval (Add left right) = eval left + eval right
+eval (Sub left right) = eval left - eval right
 eval (Mul left right) = eval left * eval right
 eval (Neg expr) = -(eval expr)
 
@@ -109,46 +117,41 @@ ws :: Parser [Char]
 ws = many (satisfy $ \c -> isSpace c)
 
 operatorParser :: Char -> (Expr -> Expr -> Expr) -> Parser (Expr -> Expr -> Expr)
-operatorParser symbol operator = parseChar symbol $> operator
+operatorParser symbol operator = do
+  ws
+  res <- parseChar symbol $> operator
+  ws
+  pure res
 
 additionP = operatorParser '+' Add
 subtractionP = operatorParser '-' Sub
 multiplicationP = operatorParser '*' Mul
 
--- parses the additive parts producing (op, rhs) where op is Expr -> Expr -> Expr
--- This means plus and minus
-additivePartParser :: Parser (Expr -> Expr -> Expr, Expr)
-additivePartParser = do
-  ws
-  op <- additionP `orElse` subtractionP
-  ws
-  rhs <- mulParser
-  pure (op, rhs)
-
-combineOpLeft :: Expr -> [(Expr -> Expr -> Expr, Expr)] -> Expr
-combineOpLeft lhs rest = foldl (\lhs (op, rhs) -> op lhs rhs) lhs rest
-
-combineLeft :: (Expr -> Expr -> Expr) -> Expr -> [Expr] -> Expr
-combineLeft op lhs rest = foldl op lhs rest
+chainLeft :: Parser Expr -> Parser (Expr -> Expr -> Expr) -> Parser Expr
+chainLeft operandParser operatorParser = do
+  lhs <- operandParser
+  rest <- many $ do
+    op <- operatorParser
+    rhs <- operandParser
+    pure (op, rhs)
+  pure $ foldl combine lhs rest
+ where
+  combine left (op, right) = op left right
 
 exprParser :: Parser Expr
-exprParser = addSubParser
+exprParser = ws *> addSubParser
 
 addSubParser :: Parser Expr
-addSubParser = do
-  first <- mulParser
-  rest <- many additivePartParser
-  pure $ combineOpLeft first rest
+addSubParser =
+  chainLeft
+    mulParser
+    $ additionP `orElse` subtractionP
 
 mulParser :: Parser Expr
-mulParser = do
-  first <- negParser
-  rest <- many $ do
-    ws
-    parseChar '*'
-    ws
+mulParser =
+  chainLeft
     negParser
-  pure $ combineLeft Mul first rest
+    $ multiplicationP
 
 negParser :: Parser Expr
 negParser =
